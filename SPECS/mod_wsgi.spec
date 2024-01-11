@@ -15,7 +15,7 @@
 
 Name:           mod_wsgi
 Version:        4.7.1
-Release:        5%{?dist}
+Release:        7%{?dist}
 Summary:        A WSGI interface for Python web applications in Apache
 License:        ASL 2.0
 URL:            https://modwsgi.readthedocs.io/
@@ -24,6 +24,7 @@ Source1:        wsgi.conf
 Source2:        wsgi-python3.conf
 Patch1:         mod_wsgi-4.5.20-exports.patch
 Patch2:         mod_wsgi-4.9.1-request-limit.patch
+Patch3:         mod_wsgi-4.7.1-remove-rpath.patch
 
 # Exclude i686 arch. Due to a modularity issue it's being added to the
 # x86_64 compose of CRB, but we don't want to ship it at all.
@@ -178,6 +179,14 @@ ln -s %{_bindir}/mod_wsgi-express-2 $RPM_BUILD_ROOT%{_bindir}/mod_wsgi-express
 %endif
 
 %changelog
+* Fri Jul 14 2023 Charalampos Stratakis <cstratak@redhat.com> - 4.7.1-7
+- Bump release for rebuild
+Resolves: rhbz#2213595
+
+* Thu Jul 13 2023 Charalampos Stratakis <cstratak@redhat.com> - 4.7.1-6
+- Remove rpath
+Resolves: rhbz#2213837
+
 * Thu Sep 08 2022 Lumír Balhar <lbalhar@redhat.com> - 4.7.1-5
 - Core dumped upon file upload >= 1GB
 Resolves: rhbz#2125172
