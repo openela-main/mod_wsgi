@@ -15,7 +15,7 @@
 
 Name:           mod_wsgi
 Version:        4.7.1
-Release:        7%{?dist}
+Release:        7%{?dist}.1
 Summary:        A WSGI interface for Python web applications in Apache
 License:        ASL 2.0
 URL:            https://modwsgi.readthedocs.io/
@@ -25,6 +25,7 @@ Source2:        wsgi-python3.conf
 Patch1:         mod_wsgi-4.5.20-exports.patch
 Patch2:         mod_wsgi-4.9.1-request-limit.patch
 Patch3:         mod_wsgi-4.7.1-remove-rpath.patch
+Patch4:         mod_wsgi-4.7.1-CVE-2022-2255.patch
 
 # Exclude i686 arch. Due to a modularity issue it's being added to the
 # x86_64 compose of CRB, but we don't want to ship it at all.
@@ -179,6 +180,10 @@ ln -s %{_bindir}/mod_wsgi-express-2 $RPM_BUILD_ROOT%{_bindir}/mod_wsgi-express
 %endif
 
 %changelog
+* Wed Apr 30 2025 Luboš Uhliarik <luhliari@redhat.com> - 4.7.1-7.1
+- Resolves: RHEL-87514 - CVE-2022-2255 python39:3.9/mod_wsgi: Trusted
+  Proxy Headers Removing Bypass
+
 * Fri Jul 14 2023 Charalampos Stratakis <cstratak@redhat.com> - 4.7.1-7
 - Bump release for rebuild
 Resolves: rhbz#2213595
