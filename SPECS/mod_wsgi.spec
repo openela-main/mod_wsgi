@@ -20,7 +20,7 @@
 
 Name:           mod_wsgi
 Version:        4.7.1
-Release:        11%{?dist}
+Release:        12%{?dist}
 Summary:        A WSGI interface for Python web applications in Apache
 License:        ASL 2.0
 URL:            https://modwsgi.readthedocs.io/
@@ -31,6 +31,7 @@ Patch1:         mod_wsgi-4.5.20-exports.patch
 Patch2:         mod_wsgi-4.7.1-remove-rpath.patch
 Patch3:         mod_wsgi-4.7.1-warning-segfaults.patch
 Patch4:         mod_wsgi-4.9.1-request-limit.patch
+Patch5:         mod_wsgi-4.7.1-dont-destroy-py-intr.patch
 
 BuildRequires: make
 BuildRequires:  httpd-devel
@@ -164,6 +165,10 @@ ln -s %{_bindir}/mod_wsgi-express-2 $RPM_BUILD_ROOT%{_bindir}/mod_wsgi-express
 %endif
 
 %changelog
+* Thu Jun 05 2025 Luboš Uhliarik <luhliari@redhat.com> - 4.7.1-12
+- Resolves: RHEL-65419 - httpd with python3-mod_wsgi is stalling in process
+  destruction
+
 * Thu Sep 01 2022 Luboš Uhliarik <luhliari@redhat.com> - 4.7.1-11
 - Resolves: #2122694 - Core dumped upon file upload >= 1GB
 

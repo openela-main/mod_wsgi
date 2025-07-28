@@ -1,0 +1,181 @@
+diff --git a/src/server/__init__.py b/src/server/__init__.py
+index 6b4a82e..6b74ada 100644
+--- a/src/server/__init__.py
++++ b/src/server/__init__.py
+@@ -335,6 +335,13 @@ WSGISocketPrefix %(server_root)s/wsgi
+ 
+ WSGISocketRotation Off
+ 
++<IfDefine ORPHAN_INTERPRETER>
++WSGIDestroyInterpreter Off
++</IfDefine>
++<IfDefine !ORPHAN_INTERPRETER>
++WSGIDestroyInterpreter On
++</IfDefine>
++
+ <IfDefine !ONE_PROCESS>
+ WSGIRestrictEmbedded On
+ <IfDefine MOD_WSGI_MULTIPROCESS>
+@@ -2565,6 +2572,10 @@ option_list = (
+             help='Specify the name of a separate log file to be used for '
+             'the managed service.'),
+ 
++    optparse.make_option('--orphan-interpreter', action='store_true',
++            default=False, help='Flag indicating whether should skip over '
++            'destroying the Python interpreter on process shutdown.'),
++
+     optparse.make_option('--enable-docs', action='store_true', default=False,
+             help='Flag indicating whether the mod_wsgi documentation should '
+             'be made available at the /__wsgi__/docs sub URL.'),
+@@ -3161,6 +3172,9 @@ def _cmd_setup_server(command, args, options):
+     else:
+         options['https_url'] = None
+ 
++    if options['orphan_interpreter']:
++        options['httpd_arguments_list'].append('-DORPHAN_INTERPRETER')
++
+     if any((options['enable_debugger'], options['enable_coverage'],
+             options['enable_profiler'], options['enable_recorder'],
+             options['enable_gdb'])):
+diff --git a/src/server/mod_wsgi.c b/src/server/mod_wsgi.c
+index 5a61999..adb5875 100644
+--- a/src/server/mod_wsgi.c
++++ b/src/server/mod_wsgi.c
+@@ -4289,6 +4289,11 @@ static apr_status_t wsgi_python_child_cleanup(void *data)
+     wsgi_publish_process_stopping(wsgi_shutdown_reason);
+ #endif
+ 
++    /* Skip destruction of Python interpreter. */
++
++    if (wsgi_server_config->destroy_interpreter == 0)
++        return APR_SUCCESS;
++
+     /* In a multithreaded MPM must protect table. */
+ 
+ #if APR_HAS_THREADS
+@@ -5023,6 +5028,28 @@ static const char *wsgi_set_python_hash_seed(cmd_parms *cmd, void *mconfig,
+     return NULL;
+ }
+ 
++static const char *wsgi_set_destroy_interpreter(cmd_parms *cmd, void *mconfig,
++                                                const char *f)
++{
++    const char *error = NULL;
++    WSGIServerConfig *sconfig = NULL;
++
++    error = ap_check_cmd_context(cmd, GLOBAL_ONLY);
++    if (error != NULL)
++        return error;
++
++    sconfig = ap_get_module_config(cmd->server->module_config, &wsgi_module);
++
++    if (strcasecmp(f, "Off") == 0)
++        sconfig->destroy_interpreter = 0;
++    else if (strcasecmp(f, "On") == 0)
++        sconfig->destroy_interpreter = 1;
++    else
++        return "WSGIDestroyInterpreter must be one of: Off | On";
++
++    return NULL;
++}
++
+ static const char *wsgi_set_restrict_embedded(cmd_parms *cmd, void *mconfig,
+                                               const char *f)
+ {
+@@ -16188,6 +16215,9 @@ static const command_rec wsgi_commands[] =
+     AP_INIT_TAKE1("WSGIPythonHashSeed", wsgi_set_python_hash_seed,
+         NULL, RSRC_CONF, "Python hash seed."),
+ 
++    AP_INIT_TAKE1("WSGIDestroyInterpreter", wsgi_set_destroy_interpreter,
++        NULL, RSRC_CONF, "Enable/Disable destruction of Python interpreter."),
++
+ #if defined(MOD_WSGI_WITH_DAEMONS)
+     AP_INIT_TAKE1("WSGIRestrictEmbedded", wsgi_set_restrict_embedded,
+         NULL, RSRC_CONF, "Enable/Disable use of embedded mode."),
+diff --git a/src/server/wsgi_interp.c b/src/server/wsgi_interp.c
+index 48680f4..a010c42 100644
+--- a/src/server/wsgi_interp.c
++++ b/src/server/wsgi_interp.c
+@@ -2019,6 +2019,11 @@ apr_status_t wsgi_python_term(void)
+ {
+     PyObject *module = NULL;
+ 
++    /* Skip destruction of Python interpreter. */
++
++    if (wsgi_server_config->destroy_interpreter == 0)
++        return APR_SUCCESS;
++
+     ap_log_error(APLOG_MARK, APLOG_INFO, 0, wsgi_server,
+                  "mod_wsgi (pid=%d): Terminating Python.", getpid());
+ 
+diff --git a/src/server/wsgi_server.c b/src/server/wsgi_server.c
+index b3eca28..c038827 100644
+--- a/src/server/wsgi_server.c
++++ b/src/server/wsgi_server.c
+@@ -101,6 +101,7 @@ WSGIServerConfig *newWSGIServerConfig(apr_pool_t *p)
+ 
+     object->python_hash_seed = NULL;
+ 
++    object->destroy_interpreter = -1;
+     object->restrict_embedded = -1;
+     object->restrict_stdin = -1;
+     object->restrict_stdout = -1;
+diff --git a/src/server/wsgi_server.h b/src/server/wsgi_server.h
+index 07ded14..f1455b6 100644
+--- a/src/server/wsgi_server.h
++++ b/src/server/wsgi_server.h
+@@ -87,6 +87,7 @@ typedef struct {
+ 
+     const char *python_hash_seed;
+ 
++    int destroy_interpreter;
+     int restrict_embedded;
+     int restrict_stdin;
+     int restrict_stdout;
+diff --git a/tests/events.wsgi b/tests/events.wsgi
+index 50b9246..228ef11 100644
+--- a/tests/events.wsgi
++++ b/tests/events.wsgi
+@@ -5,6 +5,7 @@ import traceback
+ import time
+ import os
+ import threading
++import atexit
+ 
+ try:
+     mod_wsgi.request_data()
+@@ -18,7 +19,7 @@ def wrapper(application):
+     return _application
+ 
+ def event_handler(name, **kwargs):
+-    print('EVENT', name, kwargs, os.getpid(), mod_wsgi.application_group)
++    print('EVENT-HANDLER', name, kwargs, os.getpid(), mod_wsgi.application_group)
+     if name == 'request_started':
+         thread = threading.current_thread()
+         request_data = kwargs['request_data']
+@@ -35,12 +36,24 @@ def event_handler(name, **kwargs):
+     elif name == 'process_stopping':
+         print('SHUTDOWN', mod_wsgi.active_requests)
+ 
+-print('EVENTS', mod_wsgi.event_callbacks)
++print('EVENTS#ALL', mod_wsgi.event_callbacks)
+ 
+ mod_wsgi.subscribe_events(event_handler)
+ 
++def shutdown_handler(event, **kwargs):
++    print('SHUTDOWN-HANDLER', event, kwargs)
++
++print('EVENTS#SHUTDOWN', mod_wsgi.event_callbacks)
++
++mod_wsgi.subscribe_shutdown(shutdown_handler)
++
+ print('CALLBACKS', mod_wsgi.event_callbacks)
+ 
++def atexit_handler():
++    print('ATEXIT-HANDLER')
++
++atexit.register(atexit_handler)
++
+ def application(environ, start_response):
+     failure_mode = environ.get('HTTP_X_FAILURE_MODE', '')
+     failure_mode = failure_mode.split()
